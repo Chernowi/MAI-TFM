@@ -30,7 +30,9 @@ In this section I want to summarize the previous work and research on the topic 
     This figure from the [mentioned](papers/evolution_of_oil_spils.pdf) paper illustrated the different processes the oil experiences.
     ![](figures/oil_spill_dinamics.png)
   - are there available datasets describing these events?
-    a good dataset to compare the performance against passive methods is presented in [this paper](papers/oil_spill_annotated_dataset.pdf). There are other datasets describing the properties of the spills, including the chemical characteristics and severity, but this one is very usefull as it could be used to train a segmentation model (possibly a UNet or whatever is the SOTA for this application) to compare the precision of passive methods vs active ones.
+    a good dataset to compare the performance against passive methods is presented in [this paper](papers/oil_spill_annotated_dataset.pdf).  
+    ![](figures/oil_spill_dataset.png)  
+    There are other datasets describing the properties of the spills, including the chemical characteristics and severity, but this one is very usefull as it could be used to train a segmentation model (possibly a UNet or whatever is the SOTA for this application) to compare the precision of passive methods vs active ones.
 - **Non RL techniques for efficient mapping:**
    
     most of the research I found focuses on optimal path planning for complete coverage, as an example:
