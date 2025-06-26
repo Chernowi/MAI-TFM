@@ -1,0 +1,61 @@
+agent_nn:
+  AGENT_TRANSFORMER_DROPOUT_RATE: 0.1
+  AGENT_TRANSFORMER_EMBED_DIM: 64
+  AGENT_TRANSFORMER_FFN_DIM_MULTIPLIER: 2
+  AGENT_TRANSFORMER_NUM_BLOCKS: 2
+  AGENT_TRANSFORMER_NUM_HEADS: 4
+  CNN_OUTPUT_FEATURE_DIM: 64
+environment:
+  CELL_SIZE_METERS: 50.0
+  COMMUNICATION_RADIUS_CELLS: 3
+  DIRECT_SENSING_MODE: surrounding_cells
+  FALLBACK_ENV_TIME_STEP_HOURS: 0.1
+  GLOBAL_BELIEF_POOLED_DIM: 4
+  GRID_SIZE_C: 32
+  GRID_SIZE_R: 32
+  INCLUDE_GLOBAL_BELIEF_IN_STATE: true
+  MAX_EXPECTED_CURRENT_MPS: 1.0
+  MAX_STEPS_PER_EPISODE: 200
+  NUM_AGENTS: 3
+  NUM_HEADINGS: 8
+  OBSERVATION_RADIUS_AGENTS: 7
+  episode_data_directory: episode_data
+  specific_episode_file: null
+experiment_name: TransfQMix_OilSpill_Default
+logging:
+  log_dir: logs
+  log_level: INFO
+  model_save_dir: saved_models
+  tb_log_dir: runs
+  visualization_duration_per_frame_ms: 150
+  visualization_enabled: true
+  visualization_gif_output_dir: episode_gifs
+  visualization_interval_eval_episodes: 1
+mixer_nn:
+  MIXER_MLP_HIDDEN_DIM: 32
+  MIXER_TRANSFORMER_DROPOUT_RATE: 0.1
+  MIXER_TRANSFORMER_EMBED_DIM: 64
+  MIXER_TRANSFORMER_FFN_DIM_MULTIPLIER: 2
+  MIXER_TRANSFORMER_NUM_BLOCKS: 2
+  MIXER_TRANSFORMER_NUM_HEADS: 4
+rewards:
+  PENALTY_PER_STEP: -0.01
+  REWARD_SCALING_FACTOR: 100.0
+seed: 42
+training:
+  batch_size: 32
+  epsilon_anneal_time: 100000
+  epsilon_finish: 0.05
+  epsilon_start: 1.0
+  evaluation_interval_episodes: 100
+  gamma: 0.99
+  grad_norm_clip: 10.0
+  learning_rate: 0.0003
+  learning_starts_episodes: 100
+  log_interval_episodes: 10
+  num_evaluation_episodes: 10
+  num_training_episodes: 50000
+  replay_buffer_capacity: 5000
+  save_model_interval_episodes: 500
+  target_update_interval_episodes: 10
+use_cuda: true

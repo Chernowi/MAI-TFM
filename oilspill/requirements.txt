@@ -1,0 +1,8 @@
+# marl_framework/requirements.txt
+numpy
+matplotlib
+torch
+tensorboard
+pyyaml 
+imageio
+scipy # For Huber loss, or use torch.nn.HuberLoss

@@ -1,0 +1,69 @@
+{
+  "simulation_setup": {
+    "simulation_time_hours": 48,
+    "time_step_hours": 0.25,
+    "domain_size_meters": [
+      10000,
+      10000
+    ]
+  },
+  "initial_spill": {
+    "num_particles": 1000,
+    "location_xy_meters": [
+      5000,
+      5000
+    ],
+    "radius_meters": 200
+  },
+  "particle_properties": {
+    "mean_lifetime_hours": 72,
+    "lifetime_stddev_hours": 12,
+    "diffusion_strength_m_per_sqrt_hr": 20.0
+  },
+  "initial_environment": {
+    "current_velocity_xy_m_per_hr": [
+      50.0,
+      25.0
+    ],
+    "wind_speed_m_per_hr": 150.0,
+    "wind_direction_degrees_from_north": 45,
+    "wind_effect_factor": 0.03
+  },
+  "continuous_source": {
+    "enabled": false,
+    "location_xy_meters": [
+      2000,
+      8000
+    ],
+    "source_point_radius_meters": 50,
+    "rate_per_hour": 100,
+    "duration_hours": 24
+  },
+  "environmental_changes": [
+    {
+      "time_hours": 6.0,
+      "current_velocity_xy_m_per_hr": [
+        -20.0,
+        -10.0
+      ],
+      "wind_speed_m_per_hr": 200.0,
+      "wind_direction_degrees_from_north": 180
+    },
+    {
+      "time_hours": 12.0,
+      "diffusion_strength_m_per_sqrt_hr": 30.0
+    },
+    {
+      "time_hours": 24.0,
+      "current_velocity_xy_m_per_hr": [
+        10.0,
+        60.0
+      ],
+      "wind_speed_m_per_hr": 50.0,
+      "wind_direction_degrees_from_north": 270
+    }
+  ],
+  "visualization": {
+    "plot_title_suffix": "Base Scenario"
+  }
+}
