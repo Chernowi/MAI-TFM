@@ -149,16 +149,12 @@ class TransfQMixMixer(nn.Module):
         # 5. Pass through Mixer Transformer
         mixer_transformer_output_seq = self.mixer_transformer(mixer_transformer_input_seq, src_key_padding_mask=mixer_src_key_padding_mask)
         
-        # 6. Use the first output token (corresponding to the first agent's h_state input, or a dedicated [CLS] if added)
-        #    or average pooling to generate hypernetwork parameters.
-        #    Using first token for simplicity (assuming it aggregates info).
-        hypernet_input_features = mixer_transformer_output_seq[:, 0, :] # (batch_size, mixer_embed_dim)
-        # Alternative: average over non-padded outputs
-        # valid_outputs_mask = (~mixer_src_key_padding_mask).unsqueeze(-1) # (batch, seq_len, 1)
-        # masked_outputs = mixer_transformer_output_seq * valid_outputs_mask
-        # sum_outputs = masked_outputs.sum(dim=1) # (batch, embed_dim)
-        # num_valid = valid_outputs_mask.sum(dim=1) # (batch, 1)
-        # hypernet_input_features = sum_outputs / torch.clamp(num_valid, min=1)
+        # 6. Use average pooling over all valid output tokens to generate hypernetwork parameters.
+        valid_outputs_mask = (~mixer_src_key_padding_mask).unsqueeze(-1).float() # (batch, seq_len, 1)
+        masked_outputs = mixer_transformer_output_seq * valid_outputs_mask
+        sum_outputs = masked_outputs.sum(dim=1) # (batch, embed_dim)
+        num_valid = valid_outputs_mask.sum(dim=1).clamp(min=1) # (batch, 1)
+        hypernet_input_features = sum_outputs / num_valid
 
 
         # 7. Generate MLP parameters via Hypernetwork

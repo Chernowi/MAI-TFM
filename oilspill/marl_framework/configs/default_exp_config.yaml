@@ -53,6 +53,7 @@ training:
   replay_buffer_capacity: 50000 # Number of transitions
   learning_rate: 0.0003 # Adam optimizer LR
   gamma: 0.99 # Discount factor
+  tau: 0.005 # For soft target network updates
   epsilon_start: 1.0
   epsilon_finish: 0.05
   epsilon_anneal_time: 5000 # Over this many env steps (not episodes)

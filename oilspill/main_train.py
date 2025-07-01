@@ -17,6 +17,11 @@ from marl_framework.utils import (
     save_checkpoint, load_checkpoint, EpisodeVisualizer, VISUALIZATION_ENABLED
 )
 
+def _soft_update_target_networks(policy_net, target_net, tau):
+    """Soft update target networks using Polyak averaging."""
+    for target_param, policy_param in zip(target_net.parameters(), policy_net.parameters()):
+        target_param.data.copy_(tau * policy_param.data + (1.0 - tau) * target_param.data)
+
 def _prepare_global_state_for_mixer(base_global_state_entities_batch, # List (batch_size) of List of raw entities (current, etc.)
                                    agent_f_cnn_features_batch,      # Tensor (batch_size, num_agents, cnn_dim)
                                    global_state_spec, config_env, device):
@@ -223,8 +228,8 @@ def train(config):
         tb_writer.add_scalar("Episode/Avg_IoU", avg_iou_ep, episode_num)
 
         if episode_num % config['training']['target_update_interval_episodes'] == 0:
-            agent_target_nn.load_state_dict(agent_policy_nn.state_dict())
-            mixer_target_nn.load_state_dict(mixer_policy_nn.state_dict())
+            _soft_update_target_networks(agent_policy_nn, agent_target_nn, config['training']['tau'])
+            _soft_update_target_networks(mixer_policy_nn, mixer_target_nn, config['training']['tau'])
 
         # --- CORRECTED EVALUATION AND VISUALIZATION LOOP ---
         if episode_num % config['training']['evaluation_interval_episodes'] == 0:
