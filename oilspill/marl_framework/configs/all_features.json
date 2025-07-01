@@ -1,0 +1,70 @@
+{
+  "simulation_setup": {
+    "simulation_time_hours": 36,
+    "time_step_hours": 0.1,
+    "domain_size_meters": [10000, 10000]
+  },
+  "initial_spill": {
+    "num_particles": 500,
+    "location_xy_meters": [5000, 5000],
+    "radius_meters": 200
+  },
+  "continuous_source": {
+    "enabled": true,
+    "location_xy_meters": [5000, 5000],
+    "rate_per_hour": 600,
+    "duration_hours": 30,
+    "source_point_radius_meters": 50
+  },
+  "initial_environment": {
+    "current_velocity_xy_m_per_hr": [100.0, 1800.0],
+    "wind_speed_m_per_hr": 3600,
+    "wind_direction_degrees_from_north": 45,
+    "wind_effect_factor": 0.03
+  },
+  "environmental_changes": [
+    {
+      "time_hours": 6.0,
+      "comment": "Peak Flood (North-Eastish), slackening begins",
+      "current_velocity_xy_m_per_hr": [50.0, 0.0]
+    },
+    {
+      "time_hours": 7.0,
+      "comment": "Approaching Slack Water (very weak easterly drift)",
+      "current_velocity_xy_m_per_hr": [200.0, 0.0]
+    },
+    {
+      "time_hours": 12.0,
+      "comment": "Peak Ebb (South-Westish), begins strengthening",
+      "current_velocity_xy_m_per_hr": [-100.0, -2000.0]
+    },
+    {
+      "time_hours": 18.0,
+      "comment": "Ebb slackening",
+      "current_velocity_xy_m_per_hr": [-50.0, 0.0]
+    },
+    {
+      "time_hours": 19.0,
+      "comment": "Approaching Slack Water (very weak westerly drift)",
+      "current_velocity_xy_m_per_hr": [-800.0, 0.0]
+    },
+    {
+      "time_hours": 24.0,
+      "comment": "Peak Flood (North-Eastish again), slightly weaker",
+      "current_velocity_xy_m_per_hr": [80.0, 1600.0]
+    },
+    {
+      "time_hours": 30.0,
+      "comment": "Flood slackening towards end of simulation",
+      "current_velocity_xy_m_per_hr": [40.0, 0.0]
+    }
+  ],
+  "particle_properties": {
+    "diffusion_strength_m_per_sqrt_hr": 150.0,
+    "mean_lifetime_hours": 8,
+    "lifetime_stddev_hours": 2
+  },
+  "visualization": {
+      "plot_title_suffix": "Gentle Tidal Interpolation & Source"
+  }
+}
