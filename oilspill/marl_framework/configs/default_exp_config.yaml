@@ -24,7 +24,7 @@ environment:
 # --- Reward Parameters ---
 rewards:
   REWARD_SCALING_FACTOR: 100.0
-  PENALTY_PER_STEP: -0.01
+  PENALTY_PER_STEP: 0
 
 # --- Agent Network Parameters (Shared by all agents) ---
 # TransfQMixAgentNN config
