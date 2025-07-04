@@ -6,9 +6,8 @@ from collections import OrderedDict # For ordered dict in obs/state spec
 
 class OilSpillEnv:
     def __init__(self, experiment_hyperparams, episode_data_directory, specific_episode_file=None):
-        self.config = experiment_hyperparams
-        self.episode_data_dir = episode_data_directory
-        self.specific_episode_file = specific_episode_file
+        self.config = experiment_hyperparams.get("environment", {})
+        self.reward_config = experiment_hyperparams.get("rewards", {})
 
         # Environment Grid and Agent Params from config
         self.grid_size_r = self.config.get("GRID_SIZE_R", 64)
@@ -28,12 +27,13 @@ class OilSpillEnv:
         self.comm_radius_cells = self.config.get("COMMUNICATION_RADIUS_CELLS", 5)
         self.direct_sensing_mode = self.config.get("DIRECT_SENSING_MODE", "surrounding_cells")
         
-        self.cnn_output_feature_dim = self.config.get("CNN_OUTPUT_FEATURE_DIM", 128)
+        self.cnn_output_feature_dim = experiment_hyperparams.get("agent_nn", {}).get("CNN_OUTPUT_FEATURE_DIM", 128)
         self.max_expected_current_mps = self.config.get("MAX_EXPECTED_CURRENT_MPS", 2.0)
 
         # Rewards
-        self.reward_scaling_factor = self.config.get("REWARD_SCALING_FACTOR", 100.0)
-        self.penalty_per_step = self.config.get("PENALTY_PER_STEP", -0.01)
+        self.reward_scaling_factor = self.reward_config.get("REWARD_SCALING_FACTOR", 100.0)
+        self.penalty_per_step = self.reward_config.get("PENALTY_PER_STEP", -0.01)
+        self.collision_penalty = self.reward_config.get("COLLISION_PENALTY", -10.0)
 
         # Episode termination
         self.max_steps_per_episode = self.config.get("MAX_STEPS_PER_EPISODE", 400)
@@ -159,8 +159,6 @@ class OilSpillEnv:
         obs_dict, global_state_entities = self._get_observations_and_state()
         return obs_dict, global_state_entities
     
-    # ... The rest of the file (from _get_ground_truth_grid onwards) is unchanged ...
-    # ... The step method correctly uses self.cell_size_meters, which will be populated by reset()
     def _get_ground_truth_grid(self):
         # Handle cases where current_env_step might exceed available data due to episode length vs max_steps
         idx = min(self.current_env_step, self.current_episode_data['ground_truth_grids'].shape[0] - 1)
@@ -453,39 +451,4 @@ class OilSpillEnv:
         
         infos_dict = {agent_id: {
             'iou': iou_current, 
-            'delta_iou': delta_iou,
-            'collision': collision_detected,
-            'current_vec_m_per_step': self._get_current_vector_m_per_step().tolist(),
-            'current_env_step': self.current_env_step
-            } for agent_id in self.agent_ids}
-
-        return next_obs_dict, next_global_state_entities, rewards_dict, dones_dict, infos_dict
-
-    def get_num_agents(self):
-        return self.num_agents
-
-    def get_action_space_size(self):
-        return self.action_space_size
-
-    def get_agent_ids(self):
-        return self.agent_ids
-
-    def get_observation_spec(self):
-        max_obs_entities = 1 + (self.num_agents -1) + 1 + 1 
-        max_global_state_entities = self.num_agents + 1 + (1 if self.config.get("INCLUDE_GLOBAL_BELIEF_IN_STATE", False) else 0)
-        spec = {
-            "agent_observation": {
-                "type": "list_of_variable_length_entities",
-                "entity_feature_dim": self._max_entity_features,
-            },
-            "global_state": {
-                "type": "list_of_variable_length_entities",
-                "entity_feature_dim": self._max_global_state_entity_features,
-            },
-            "belief_map_shape": (self.grid_size_r, self.grid_size_c, 1)
-        }
-        return spec
-
-    def render(self, mode='human'):
-        # This method is also fine and will work correctly once cell_size_meters is set.
-        pass
+            'delta_iou': delta_iio

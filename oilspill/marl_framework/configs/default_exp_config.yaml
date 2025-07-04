@@ -25,10 +25,12 @@ environment:
 rewards:
   REWARD_SCALING_FACTOR: 100.0
   PENALTY_PER_STEP: 0
+  COLLISION_PENALTY: -10.0 # Penalty for agent-agent or agent-boundary collision
 
 # --- Agent Network Parameters (Shared by all agents) ---
 # TransfQMixAgentNN config
 agent_nn:
+  BELIEF_MAP_PROCESSOR: "cnn" # "cnn" or "maxpool"
   CNN_OUTPUT_FEATURE_DIM: 128
   AGENT_TRANSFORMER_EMBED_DIM: 64 # d_model for agent transformer
   AGENT_TRANSFORMER_NUM_HEADS: 4

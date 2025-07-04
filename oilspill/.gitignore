@@ -1,0 +1,13 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Logs and TensorBoard runs
+marl_framework/logs/
+marl_framework/runs/
+
+# Saved models
+marl_framework/saved_models/
+
+# Generated episode data
+marl_framework/episode_data/

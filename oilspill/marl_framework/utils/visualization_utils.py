@@ -67,10 +67,13 @@ class EpisodeVisualizer:
     def add_frame(self, ground_truth_grid, shared_consensus_map, 
                   agent_positions_rc_dict, agent_headings_dict, 
                   current_vector_m_per_step, timestep_info_string):
-        if not self.enabled or plt is None: return
+        """Adds a single frame to the current recording."""
+        if not self.enabled:
+            return
 
-        fig, ax = plt.subplots(figsize=(10, 8))
+        fig, ax = plt.subplots(figsize=(10, 10 * self.grid_r / self.grid_c))
         
+        # --- Plot Ground Truth Oil Spill (as a heatmap) ---
         # Plot extents (in grid cells)
         plot_extent = [-0.5, self.grid_c - 0.5, self.grid_r - 0.5, -0.5] # left, right, bottom, top for imshow with origin 'upper'
 
