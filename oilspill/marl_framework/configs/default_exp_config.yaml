@@ -63,7 +63,7 @@ training:
   grad_norm_clip: 10.0 # Max norm for gradient clipping
   learning_starts_episodes: 100 # Start learning after this many episodes filled in buffer
   
-  evaluation_interval_episodes: 50
+  evaluation_interval_episodes: 1
   num_evaluation_episodes: 5 # Number of episodes to run for evaluation
   save_model_interval_episodes: 100 # How often to save model checkpoints
 

@@ -35,6 +35,11 @@ class EpisodeVisualizer:
             # Agent colors
             self.agent_colors = plt.cm.get_cmap('gist_rainbow', num_agents) \
                                 if num_agents > 0 else ['blue']
+            
+            # Colors for individual agent beliefs
+            # Generate a list of RGBA colors from the agent colormap
+            self.agent_belief_colors = [self.agent_colors(i) for i in range(num_agents)]
+            
             # Heading symbols/arrows
             # Grid: +r is Down (South), +c is Right (East)
             # Headings: 0:N, 1:NE, 2:E, 3:SE, 4:S, 5:SW, 6:W, 7:NW (for 8 headings)
@@ -62,18 +67,22 @@ class EpisodeVisualizer:
         self.frames = []
         self.current_episode_number = episode_number
         self.output_gif_path_template = output_gif_path_template
-        print(f"Visualizer: Starting recording for episode {episode_number}.")
+        print(f"Starting GIF recording for episode {self.current_episode_number}...")
 
-    def add_frame(self, ground_truth_grid, shared_consensus_map, 
+    def add_frame(self, ground_truth_grid, agent_belief_maps_dict, shared_consensus_map, 
                   agent_positions_rc_dict, agent_headings_dict, 
                   current_vector_m_per_step, timestep_info_string):
         """Adds a single frame to the current recording."""
         if not self.enabled:
             return
 
-        fig, ax = plt.subplots(figsize=(10, 10 * self.grid_r / self.grid_c))
+        # Create a figure with two subplots: one for the main map, one for the shared map
+        fig, (ax, ax_shared) = plt.subplots(1, 2, figsize=(13, 10 * self.grid_r / self.grid_c), 
+                                            gridspec_kw={'width_ratios': [10, 3]})
         
-        # --- Plot Ground Truth Oil Spill (as a heatmap) ---
+        fig.suptitle(f"Oil Spill Response - {timestep_info_string}", fontsize=16)
+
+        # --- Plot Ground Truth Oil Spill (as a heatmap) on the main axis ---
         # Plot extents (in grid cells)
         plot_extent = [-0.5, self.grid_c - 0.5, self.grid_r - 0.5, -0.5] # left, right, bottom, top for imshow with origin 'upper'
 
@@ -83,12 +92,26 @@ class EpisodeVisualizer:
         gt_display[ground_truth_grid == 0] = 1.0 # White for true clean
         ax.imshow(gt_display, cmap='gray_r', vmin=0, vmax=1, extent=plot_extent, origin='upper', alpha=0.5, zorder=0)
 
-        # 2. Shared Consensus Map (e.g., blue for predicted oil, red for predicted clean, transparent for unknown)
-        consensus_display = np.ones((self.grid_r, self.grid_c, 4)) # RGBA
-        consensus_display[shared_consensus_map == 1] = [0, 0, 1, 0.7]  # Blue for predicted oil (semi-transparent)
-        consensus_display[shared_consensus_map == 0] = [1, 0, 0, 0.3]  # Red for predicted clean (more transparent)
-        consensus_display[shared_consensus_map == -1, 3] = 0 # Fully transparent for unknown
-        ax.imshow(consensus_display, extent=plot_extent, origin='upper', zorder=1)
+        # 2. Individual Agent Belief Maps
+        for i, agent_id in enumerate(agent_positions_rc_dict.keys()):
+            belief_map = agent_belief_maps_dict.get(agent_id)
+            if belief_map is None: continue
+
+            agent_belief_display = np.zeros((self.grid_r, self.grid_c, 4)) # RGBA
+            
+            # Get base color for the agent
+            base_color = self.agent_belief_colors[i]
+
+            # Set color for cells believed to be oil
+            oil_mask = (belief_map == 1)
+            agent_belief_display[oil_mask] = [*base_color[:3], 0.5] # Color with 50% alpha
+
+            # Set color for cells believed to be clean
+            clean_mask = (belief_map == 0)
+            agent_belief_display[clean_mask] = [*base_color[:3], 0.15] # Same color, but more transparent
+
+            ax.imshow(agent_belief_display, extent=plot_extent, origin='upper', zorder=1)
+
 
         # 3. Agent Positions and Headings
         arrow_scale = 0.4 # Scale for heading arrows relative to cell size
@@ -131,17 +154,33 @@ class EpisodeVisualizer:
                  -curr_dr_per_step * 5, # Scale and invert dy for plot
                  head_width=0.5, head_length=0.5, fc='purple', ec='purple', zorder=2, alpha=0.7, label="Current")
 
-        # Setup plot
+        # Setup main plot
         ax.set_xlim(-0.5, self.grid_c - 0.5)
         ax.set_ylim(self.grid_r - 0.5, -0.5) # Flipped y-axis for 'upper' origin
         ax.set_xticks(np.arange(0, self.grid_c, max(1, self.grid_c//10)))
         ax.set_yticks(np.arange(0, self.grid_r, max(1, self.grid_r//10)))
         ax.set_xlabel("Grid Column (X)")
         ax.set_ylabel("Grid Row (Y)")
-        ax.set_title(f"Oil Spill Response - {timestep_info_string}")
-        ax.grid(True, linestyle=':', alpha=0.5)
-        ax.legend(loc='upper right', bbox_to_anchor=(1.25, 1.0))
-        plt.tight_layout(rect=[0, 0, 0.9, 1]) # Adjust for legend
+        ax.set_title("Main View (Agent Beliefs Overlay)")
+        ax.set_aspect('equal', adjustable='box')
+        # Set grid to align with cells
+        ax.set_xticks(np.arange(-0.5, self.grid_c, 1), minor=True)
+        ax.set_yticks(np.arange(-0.5, self.grid_r, 1), minor=True)
+        ax.grid(which='minor', color='k', linestyle=':', linewidth=0.5, alpha=0.3)
+        ax.legend(loc='upper right', bbox_to_anchor=(1.35, 1.0))
+
+        # --- Plot Shared Consensus Map on the side axis ---
+        consensus_display = np.ones((self.grid_r, self.grid_c, 4)) # RGBA
+        consensus_display[shared_consensus_map == 1] = [0, 0, 1, 0.7]  # Blue for predicted oil
+        consensus_display[shared_consensus_map == 0] = [1, 0, 0, 0.3]  # Red for predicted clean
+        consensus_display[shared_consensus_map == -1, 3] = 0 # Transparent for unknown
+        ax_shared.imshow(consensus_display, extent=plot_extent, origin='upper')
+        ax_shared.set_title("Shared Belief Map")
+        ax_shared.set_xticks([])
+        ax_shared.set_yticks([])
+        ax_shared.set_aspect('equal', adjustable='box')
+
+        plt.tight_layout(rect=[0, 0, 1, 0.96]) # Adjust for suptitle
 
         # Save to in-memory buffer
         buf = io.BytesIO()
@@ -189,6 +228,11 @@ if __name__ == '__main__':
 
         for t_step in range(5):
             gt_grid = np.random.randint(0, 2, (g_r, g_c))
+            
+            # Generate individual belief maps for each agent
+            agent_beliefs = {f"agent_{i}": np.random.randint(-1, 2, (g_r, g_c)) for i in range(n_a)}
+            
+            # The shared map would be derived from these in a real scenario
             consensus = np.random.randint(-1, 2, (g_r, g_c))
             
             agent_pos = {f"agent_{i}": (np.random.randint(0,g_r), np.random.randint(0,g_c)) for i in range(n_a)}
@@ -197,7 +241,7 @@ if __name__ == '__main__':
             current_vec = np.array([0.5, -0.2]) * cell_m # m/step
 
             info_str = f"Timestep {t_step}, IoU: {np.random.rand():.2f}"
-            vis.add_frame(gt_grid, consensus, agent_pos, agent_h, current_vec, info_str)
+            vis.add_frame(gt_grid, agent_beliefs, consensus, agent_pos, agent_h, current_vec, info_str)
         
         vis.save_recording(duration_per_frame_ms=500)
         vis.close()

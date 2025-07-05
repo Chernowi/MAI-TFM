@@ -250,9 +250,13 @@ def train(config):
                     # Add a frame for the initial state (Step 0)
                     initial_iou = eval_env.iou_oil_previous_step
                     vis_info_str = f"Eval Ep {eval_ep_num+1}, Step 0 (Initial), IoU: {initial_iou:.3f}"
-                    visualizer.add_frame(eval_env._get_ground_truth_grid(), eval_env.shared_consensus_map,
-                                         eval_env.agent_positions_rc, eval_env.agent_headings,
-                                         eval_env._get_current_vector_m_per_step(), vis_info_str)
+                    visualizer.add_frame(eval_env._get_ground_truth_grid(), 
+                                         eval_env.agent_belief_maps,  # Make sure this is the correct dict
+                                         eval_env.shared_consensus_map,
+                                         eval_env.agent_positions_rc,
+                                         eval_env.agent_headings,
+                                         eval_env._get_current_vector_m_per_step(),
+                                         timestep_info_string=vis_info_str)
 
                 for step_in_eval_ep in range(config['environment']['MAX_STEPS_PER_EPISODE']):
                     eval_ep_steps += 1
@@ -275,9 +279,13 @@ def train(config):
                     # 2. Add a frame for the NEW state, using the info from the step that led to it
                     if vis_this_eval_ep:
                          vis_info_str = f"Eval Ep {eval_ep_num+1}, Step {eval_ep_steps}, IoU: {infos_eval[agent_ids[0]]['iou']:.3f}"
-                         visualizer.add_frame(eval_env._get_ground_truth_grid(), eval_env.shared_consensus_map,
-                                             eval_env.agent_positions_rc, eval_env.agent_headings,
-                                             eval_env._get_current_vector_m_per_step(), vis_info_str)
+                         visualizer.add_frame(eval_env._get_ground_truth_grid(), 
+                                             eval_env.agent_belief_maps,  # Make sure this is the correct dict
+                                             eval_env.shared_consensus_map,
+                                             eval_env.agent_positions_rc,
+                                             eval_env.agent_headings,
+                                             eval_env._get_current_vector_m_per_step(),
+                                             timestep_info_string=vis_info_str)
 
                     # 3. Update metrics and states for the next loop iteration
                     eval_ep_reward += rewards_eval[agent_ids[0]]
