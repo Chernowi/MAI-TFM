@@ -6,34 +6,33 @@ seed: 42 # For reproducibility
 environment:
   episode_data_directory: "marl_framework/episode_data" # Relative to project root or absolute
   specific_episode_file: null # or "episode_xyz.npz" for specific eval
-  GRID_SIZE_R: 32 # Smaller for faster initial tests
-  GRID_SIZE_C: 32
-  CELL_SIZE_METERS: 50.0
+  GRID_SIZE_R: 64 # The resolution of the grid for the environment
+  GRID_SIZE_C: 64
+  # CELL_SIZE_METERS is now calculated automatically during data generation based on the 
+  # simulation domain size to ensure the grid covers the entire simulated area.
   NUM_AGENTS: 3
   NUM_HEADINGS: 8 # 4 or 8
-  OBSERVATION_RADIUS_AGENTS: 7
-  COMMUNICATION_RADIUS_CELLS: 3 # Chebyshev distance
+  OBSERVATION_RADIUS_AGENTS: 10 # In grid cells
+  COMMUNICATION_RADIUS_CELLS: 5 # Chebyshev distance
   DIRECT_SENSING_MODE: "surrounding_cells" # "current_cell", "surrounding_cells", "none"
-  MAX_STEPS_PER_EPISODE: 200 # Max steps per MARL episode
-  MAX_EXPECTED_CURRENT_MPS: 1.0 # m/s, for normalizing current in global state
+  MAX_STEPS_PER_EPISODE: 300 # Max steps per MARL episode
+  MAX_EXPECTED_CURRENT_MPS: 2.0 # m/s, for normalizing current in global state
   FALLBACK_ENV_TIME_STEP_HOURS: 0.1 # Used if episode data lacks this info
   INCLUDE_GLOBAL_BELIEF_IN_STATE: true # For mixer's global state
-  GLOBAL_BELIEF_POOLED_DIM: 4 # If map is 32x32, this makes 4x4 summary
+  GLOBAL_BELIEF_POOLED_DIM: 8 # If map is 64x64, this makes 8x8 summary
 
 # --- Reward Parameters ---
 rewards:
   REWARD_SCALING_FACTOR: 100.0
-  PENALTY_PER_STEP: -0.01
+  PENALTY_PER_STEP: 0
+  COLLISION_PENALTY: -10.0 # Penalty for agent-agent or agent-boundary collision
+  BOUNDARY_VIOLATION_PENALTY: -10.0  # Penalty for attempting to move outside grid boundaries
 
 # --- Agent Network Parameters (Shared by all agents) ---
 # TransfQMixAgentNN config
 agent_nn:
-  CNN_OUTPUT_FEATURE_DIM: 64
-  # CNN Architecture (example, BeliefMapCNN internal defaults will be used if not specified here, or pass specific layer configs)
-  # CNN_FILTERS: [16, 32, 64]
-  # CNN_KERNELS: [5, 3, 3]
-  # CNN_STRIDES: [1, 1, 1]
-  # CNN_PADDINGS: [2, 1, 1]
+  BELIEF_MAP_PROCESSOR: "cnn" # "cnn" or "maxpool"
+  CNN_OUTPUT_FEATURE_DIM: 128
   AGENT_TRANSFORMER_EMBED_DIM: 64 # d_model for agent transformer
   AGENT_TRANSFORMER_NUM_HEADS: 4
   AGENT_TRANSFORMER_NUM_BLOCKS: 2
@@ -48,29 +47,26 @@ mixer_nn:
   MIXER_TRANSFORMER_NUM_BLOCKS: 2
   MIXER_TRANSFORMER_FFN_DIM_MULTIPLIER: 2
   MIXER_TRANSFORMER_DROPOUT_RATE: 0.1
-  MIXER_MLP_HIDDEN_DIM: 32 # Hidden dimension for the monotonic MLP
+  MIXER_MLP_HIDDEN_DIM: 64 # Hidden dimension for the monotonic MLP
 
 # --- Training Parameters ---
 training:
   num_training_episodes: 50000
   batch_size: 32
-  replay_buffer_capacity: 5000 # Number of transitions
+  replay_buffer_capacity: 50000 # Number of transitions
   learning_rate: 0.0003 # Adam optimizer LR
   gamma: 0.99 # Discount factor
+  tau: 0.005 # For soft target network updates
   epsilon_start: 1.0
   epsilon_finish: 0.05
-  epsilon_anneal_time: 100000 # Over this many env steps (not episodes)
+  epsilon_anneal_time: 5000 # Over this many env steps (not episodes)
   target_update_interval_episodes: 10 # Hard update target networks every N episodes
-  # soft_target_update_tau: 0.005 # Alternative: Polyak averaging (if interval is 1)
   grad_norm_clip: 10.0 # Max norm for gradient clipping
   learning_starts_episodes: 100 # Start learning after this many episodes filled in buffer
   
-  # How often to log training progress (in episodes)
-  log_interval_episodes: 10
-  # How often to evaluate the model (in episodes)
   evaluation_interval_episodes: 1
-  num_evaluation_episodes: 10 # Number of episodes to run for evaluation
-  save_model_interval_episodes: 500 # How often to save model checkpoints
+  num_evaluation_episodes: 5 # Number of episodes to run for evaluation
+  save_model_interval_episodes: 100 # How often to save model checkpoints
 
 # --- CUDA ---
 use_cuda: true # Set to false to force CPU
@@ -78,10 +74,10 @@ use_cuda: true # Set to false to force CPU
 # --- Logging and Visualization ---
 logging:
   log_dir: "marl_framework/logs"
-  log_level: "DEBUG" # DEBUG, INFO, WARNING, ERROR
+  log_level: "INFO" # DEBUG, INFO, WARNING, ERROR
   tb_log_dir: "marl_framework/runs"
   model_save_dir: "marl_framework/saved_models"
   visualization_enabled: true # Enable GIF generation during evaluation
   visualization_interval_eval_episodes: 1 # Generate GIF for every Nth evaluation episode
-  visualization_gif_output_dir: "episode_gifs"
+  visualization_gif_output_dir: "marl_framework/episode_gifs"
   visualization_duration_per_frame_ms: 150

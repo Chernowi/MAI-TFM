@@ -49,6 +49,31 @@ class BeliefMapCNN(nn.Module):
         f_cnn = F.relu(self.fc_out(x)) # (batch_size, cnn_output_feature_dim)
         return f_cnn
 
+class BeliefMapMaxPooler(nn.Module):
+    """
+    Processes the belief map by adaptive max pooling and a linear layer.
+    A simpler alternative to the full CNN.
+    """
+    def __init__(self, output_dim, config):
+        super(BeliefMapMaxPooler, self).__init__()
+        # Use adaptive pooling to handle any grid size and produce a fixed-size output
+        self.pool_dim = config.get("MAXPOOL_DIM", 8) # e.g., 8x8 output
+        self.pool = nn.AdaptiveMaxPool2d((self.pool_dim, self.pool_dim))
+        self.flattened_dim = self.pool_dim * self.pool_dim
+        self.fc_out = nn.Linear(self.flattened_dim, output_dim)
+
+    def forward(self, belief_map_batch):
+        # belief_map_batch: (batch_size, grid_r, grid_c)
+        # Add channel dimension: (batch_size, 1, grid_r, grid_c)
+        x = belief_map_batch.unsqueeze(1)
+        
+        # Normalize belief values from -1,0,1 to a suitable range e.g. 0, 0.5, 1
+        x = (x + 1.0) / 2.0
+
+        x = self.pool(x)
+        x = x.reshape(-1, self.flattened_dim) # Flatten
+        f_out = F.relu(self.fc_out(x)) # (batch_size, output_dim)
+        return f_out
 
 class EntityEmbedder(nn.Module):
     def __init__(self, raw_feature_dim, embed_dim):
@@ -101,7 +126,14 @@ class TransfQMixAgentNN(nn.Module):
         
         grid_r, grid_c, _ = env_obs_spec["belief_map_shape"]
         self.cnn_output_dim = agent_config.get("CNN_OUTPUT_FEATURE_DIM", 128)
-        self.belief_map_cnn = BeliefMapCNN(grid_r, grid_c, self.cnn_output_dim, agent_config)
+        
+        self.belief_processor_type = agent_config.get("BELIEF_MAP_PROCESSOR", "cnn")
+        if self.belief_processor_type == "cnn":
+            self.belief_map_processor = BeliefMapCNN(grid_r, grid_c, self.cnn_output_dim, agent_config)
+        elif self.belief_processor_type == "maxpool":
+            self.belief_map_processor = BeliefMapMaxPooler(self.cnn_output_dim, agent_config)
+        else:
+            raise ValueError(f"Unknown BELIEF_MAP_PROCESSOR type: {self.belief_processor_type}")
 
         self.entity_raw_feature_dim = env_obs_spec["agent_observation"]["entity_feature_dim"]
         self.transformer_embed_dim = agent_config.get("AGENT_TRANSFORMER_EMBED_DIM", 64)
@@ -146,8 +178,8 @@ class TransfQMixAgentNN(nn.Module):
         """
         batch_size = agent_belief_map_batch.shape[0]
 
-        # 1. Process belief map through CNN
-        f_cnn_out = self.belief_map_cnn(agent_belief_map_batch) # (batch_size, cnn_output_dim)
+        # 1. Process belief map through the selected processor (CNN or MaxPooler)
+        f_cnn_out = self.belief_map_processor(agent_belief_map_batch) # (batch_size, cnn_output_dim)
 
         # 2. Prepare entity sequence for transformer
         #    The environment provides raw_obs_entity_list_batch where one entity might be a placeholder for F_cnn.

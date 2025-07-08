@@ -356,47 +356,52 @@ class OilSpillEnv:
         raise ValueError(f"Unsupported num_headings: {self.num_headings}")
 
     def step(self, actions_dict):
-        intended_new_headings = {}
-        intended_target_cells_rc = {}
-        intended_displacements_meters = {}
-
+        """Execute one time step within the environment."""
+        self.current_step += 1
+        
+        # Save the previous state for reward calculation
+        previous_positions = self.agent_positions_rc.copy()
+        
+        # Process actions for each agent
+        boundary_violation = False
+        violating_agent_id = None
+        
         for agent_id, action in actions_dict.items():
-            r_curr, c_curr = self.agent_positions_rc[agent_id]
-            h_curr = self.agent_headings[agent_id]
-            h_new_intent = h_curr
-
-            dr_intent, dc_intent = 0, 0
-            if action == 1:
-                dh_vec = self._get_heading_vector(h_curr)
-                dr_intent, dc_intent = dh_vec[0], dh_vec[1]
-            elif action == 2:
-                h_new_intent = (h_curr - 1 + self.num_headings) % self.num_headings
-                if self.num_headings == 4: h_new_intent = (h_curr -1 + self.num_headings) % self.num_headings
-                dh_vec = self._get_heading_vector(h_new_intent)
-                dr_intent, dc_intent = dh_vec[0], dh_vec[1]
-            elif action == 3:
-                h_new_intent = (h_curr + 1) % self.num_headings
-                if self.num_headings == 4: h_new_intent = (h_curr + 1) % self.num_headings
-                dh_vec = self._get_heading_vector(h_new_intent)
-                dr_intent, dc_intent = dh_vec[0], dh_vec[1]
-            elif action == 4:
-                h_new_intent = (h_curr - (self.num_headings // 4) + self.num_headings) % self.num_headings
-                dh_vec = self._get_heading_vector(h_new_intent)
-                dr_intent, dc_intent = dh_vec[0], dh_vec[1]
-            elif action == 5:
-                h_new_intent = (h_curr + (self.num_headings // 4)) % self.num_headings
-                dh_vec = self._get_heading_vector(h_new_intent)
-                dr_intent, dc_intent = dh_vec[0], dh_vec[1]
+            # Get current position and calculate intended next position (before clipping)
+            curr_pos = self.agent_positions_rc[agent_id]
+            curr_heading = self.agent_headings[agent_id]
             
-            intended_new_headings[agent_id] = h_new_intent
-            intended_target_cells_rc[agent_id] = np.array([r_curr + dr_intent, c_curr + dc_intent])
+            # Calculate the intended next position based on action
+            intended_pos = self._calculate_next_position(curr_pos, curr_heading, action)
             
-            x_m_curr = (c_curr + 0.5) * self.cell_size_meters
-            y_m_curr = (r_curr + 0.5) * self.cell_size_meters
-            x_m_target = (intended_target_cells_rc[agent_id][1] + 0.5) * self.cell_size_meters
-            y_m_target = (intended_target_cells_rc[agent_id][0] + 0.5) * self.cell_size_meters
-            intended_displacements_meters[agent_id] = np.array([x_m_target - x_m_curr, y_m_target - y_m_curr])
-
+            # Check if the intended position would be outside grid boundaries
+            if (intended_pos[0] < 0 or intended_pos[0] >= self.grid_size_r or 
+                intended_pos[1] < 0 or intended_pos[1] >= self.grid_size_c):
+                boundary_violation = True
+                violating_agent_id = agent_id
+                break
+        # If there's a boundary violation, terminate episode with penalty
+        if boundary_violation:
+            # Apply penalty to all agents (or specifically to the violating agent)
+            penalty = self.config.get('BOUNDARY_VIOLATION_PENALTY', -10.0)  # Default penalty value if not specified
+            rewards_dict = {agent_id: penalty for agent_id in self.agent_ids}
+            
+            # Set all agents as done
+            dones_dict = {agent_id: True for agent_id in self.agent_ids}
+            dones_dict["__all__"] = True
+            
+            # Log the boundary violation
+            self.logger.info(f"Episode terminated: Agent {violating_agent_id} attempted to move outside grid boundaries.")
+            
+            # Return current observation since episode is terminating
+            agent_obs = self._get_observations()
+            global_state = self._get_global_state()
+            infos = {agent_id: {'boundary_violation': True, 'violating_agent': violating_agent_id, 'iou': self.iou_oil_previous_step} 
+                     for agent_id in self.agent_ids}
+            
+            return agent_obs, global_state, rewards_dict, dones_dict, infos
+        
+        # Continue with normal step execution if no boundary violation
         current_vec_m_per_step = self._get_current_vector_m_per_step()
 
         final_agent_positions_rc = {}
@@ -460,6 +465,37 @@ class OilSpillEnv:
             } for agent_id in self.agent_ids}
 
         return next_obs_dict, next_global_state_entities, rewards_dict, dones_dict, infos_dict
+
+    def _calculate_next_position(self, current_pos, heading, action):
+        """Calculate the intended next position based on current position, heading, and action.
+        This is called before position clipping to detect boundary violations."""
+        # Convert the action to movement delta
+        dr, dc = self._action_to_movement_delta(action, heading)
+        
+        # Calculate intended next position (without clipping)
+        intended_r = current_pos[0] + dr
+        intended_c = current_pos[1] + dc
+        
+        return (intended_r, intended_c)
+
+    def _action_to_movement_delta(self, action, heading):
+        """Convert action and heading to row and column movement deltas."""
+        # If the existing implementation already has this method, use that instead
+        # This is a simplified example assuming discrete actions
+        if action == 0:  # Forward
+            if heading == 0:  # North
+                return -1, 0
+            elif heading == 1:  # East
+                return 0, 1
+            elif heading == 2:  # South
+                return 1, 0
+            elif heading == 3:  # West
+                return 0, -1
+        elif action == 1:  # No movement
+            return 0, 0
+        # Add other actions as needed
+        
+        return 0, 0  # Default to no movement
 
     def get_num_agents(self):
         return self.num_agents

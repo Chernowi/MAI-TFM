@@ -26,6 +26,7 @@ rewards:
   REWARD_SCALING_FACTOR: 100.0
   PENALTY_PER_STEP: 0
   COLLISION_PENALTY: -10.0 # Penalty for agent-agent or agent-boundary collision
+  BOUNDARY_VIOLATION_PENALTY: -10.0  # Penalty for attempting to move outside grid boundaries
 
 # --- Agent Network Parameters (Shared by all agents) ---
 # TransfQMixAgentNN config

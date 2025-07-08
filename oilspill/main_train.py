@@ -64,11 +64,6 @@ def train(config):
     else:
         device = torch.device("cpu")
 
-    if config['seed'] is not None:
-        torch.manual_seed(config['seed'])
-        np.random.seed(config['seed'])
-        random.seed(config['seed'])
-
     logger, log_subdir = setup_logger(config['experiment_name'], 
                                       log_dir=os.path.join(config['logging']['log_dir'], config['experiment_name']),
                                       level=config['logging']['log_level'].upper())
@@ -334,6 +329,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
     with open(args.config, 'r') as f: config_params = yaml.safe_load(f)
     
+    # Seed generators here, once at the start of the script.
+    if config_params['seed'] is not None:
+        torch.manual_seed(config_params['seed'])
+        np.random.seed(config_params['seed'])
+        random.seed(config_params['seed'])
+
     os.makedirs(os.path.join(config_params['logging']['log_dir'], config_params['experiment_name']), exist_ok=True)
     os.makedirs(os.path.join(config_params['logging']['tb_log_dir'], config_params['experiment_name']), exist_ok=True)
     os.makedirs(os.path.join(config_params['logging']['model_save_dir'], config_params['experiment_name']), exist_ok=True)
