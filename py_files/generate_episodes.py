@@ -110,11 +110,10 @@ def generate_episodes(num_episodes, steps_per_episode, grid_size_r, grid_size_c,
 
 
 if __name__ == "__main__":
-    # --- MODIFICATION START ---
-    # Set up argument parser with defaults that align with the main experiment config.
+    # --- MODIFICATION: Set up argument parser with defaults that align with the main experiment config.
     parser = argparse.ArgumentParser(description="Generate oil spill episode data for MARL training.")
     
-    parser.add_argument("--num_episodes", type=int, default=1, 
+    parser.add_argument("--num_episodes", type=int, default=200, 
                         help="Number of distinct episode scenarios to generate. Default: 200")
     
     parser.add_argument("--steps_per_episode", type=int, default=500, 
@@ -131,7 +130,6 @@ if __name__ == "__main__":
     
     parser.add_argument("--sim_config_file", type=str, default="marl_framework/configs/all_features.json", 
                         help="Path to the JSON configuration file for the OilSpillSimulatorCore.")
-    # --- MODIFICATION END ---
     
     args = parser.parse_args()
 

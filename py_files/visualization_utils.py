@@ -20,10 +20,11 @@ except ImportError:
 
 
 class EpisodeVisualizer:
-    def __init__(self, grid_size_r, grid_size_c, num_agents, cell_size_m, enabled=True):
+    def __init__(self, grid_size_r, grid_size_c, num_agents, num_headings, cell_size_m, enabled=True):
         self.grid_r = grid_size_r
         self.grid_c = grid_size_c
         self.num_agents = num_agents
+        self.num_headings = num_headings # Added for correct arrow plotting
         self.cell_size_m = cell_size_m
         self.enabled = enabled and VISUALIZATION_ENABLED # Global and instance enable flags
 
@@ -94,8 +95,10 @@ class EpisodeVisualizer:
 
         # 2. Individual Agent Belief Maps
         for i, agent_id in enumerate(agent_positions_rc_dict.keys()):
-            belief_map = agent_belief_maps_dict.get(agent_id)
-            if belief_map is None: continue
+            # FIX: Access the 'belief' key from the agent's belief dictionary
+            belief_map_data = agent_belief_maps_dict.get(agent_id)
+            if belief_map_data is None: continue
+            belief_map = belief_map_data['belief'] # Extract the numpy array
 
             agent_belief_display = np.zeros((self.grid_r, self.grid_c, 4)) # RGBA
             
@@ -130,10 +133,13 @@ class EpisodeVisualizer:
             
             # Heading arrow
             if self.num_agents > 0: # Ensure there are agents
-                if len(agent_headings_dict) == 8 : # num_headings
+                # FIX: Check self.num_headings, not the length of the dictionary
+                if self.num_headings == 8 :
                     arrow_dx, arrow_dy = self.heading_arrows_plot_coords_8.get(h, (0,0))
-                else: # Assume 4 headings
+                elif self.num_headings == 4:
                     arrow_dx, arrow_dy = self.heading_arrows_plot_coords_4.get(h, (0,0))
+                else:
+                    arrow_dx, arrow_dy = (0,0) # No arrows for other heading counts
                 
                 # Plot arrows with y-axis inverted (standard matplotlib) from grid's +r = South
                 # Our heading_arrows_plot_coords are already for standard plot coords (+y is Up)
@@ -221,22 +227,29 @@ if __name__ == '__main__':
         print("Running visualization test...")
         g_r, g_c = 10, 12
         n_a = 2
+        n_h = 8
         cell_m = 10
 
-        vis = EpisodeVisualizer(g_r, g_c, n_a, cell_m)
+        vis = EpisodeVisualizer(g_r, g_c, n_a, n_h, cell_m)
         vis.start_episode_recording(episode_number=1, output_gif_path_template="test_vis_ep{ep_num}.gif")
 
         for t_step in range(5):
             gt_grid = np.random.randint(0, 2, (g_r, g_c))
             
             # Generate individual belief maps for each agent
-            agent_beliefs = {f"agent_{i}": np.random.randint(-1, 2, (g_r, g_c)) for i in range(n_a)}
+            # The visualizer expects the full dict with 'belief' key
+            agent_beliefs = {
+                f"agent_{i}": {
+                    'belief': np.random.randint(-1, 2, (g_r, g_c)),
+                    'timestamp': np.random.randint(0, 10, (g_r, g_c))
+                } for i in range(n_a)
+            }
             
             # The shared map would be derived from these in a real scenario
             consensus = np.random.randint(-1, 2, (g_r, g_c))
             
             agent_pos = {f"agent_{i}": (np.random.randint(0,g_r), np.random.randint(0,g_c)) for i in range(n_a)}
-            agent_h = {f"agent_{i}": np.random.randint(0,8) for i in range(n_a)} # Assuming 8 headings
+            agent_h = {f"agent_{i}": np.random.randint(0,n_h) for i in range(n_a)} # Use n_h
             
             current_vec = np.array([0.5, -0.2]) * cell_m # m/step
 
