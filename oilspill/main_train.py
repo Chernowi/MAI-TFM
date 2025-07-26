@@ -18,51 +18,26 @@ from marl_framework.utils import (
 )
 
 def _soft_update_target_networks(policy_net, target_net, tau):
-    """Soft update target networks using Polyak averaging."""
+    """
+    Perform soft update of target networks using Polyak averaging.
+    
+    Args:
+        policy_net (torch.nn.Module): The policy network to copy parameters from
+        target_net (torch.nn.Module): The target network to update
+        tau (float): Interpolation parameter for soft update (0 < tau < 1)
+    """
     for target_param, policy_param in zip(target_net.parameters(), policy_net.parameters()):
         target_param.data.copy_(tau * policy_param.data + (1.0 - tau) * target_param.data)
 
-def _prepare_global_state_for_mixer(base_global_state_entities_batch, # List (batch_size) of List of raw entities (current, etc.)
-                                   agent_f_cnn_features_batch,      # Tensor (batch_size, num_agents, cnn_dim)
-                                   global_state_spec, config_env, device):
-    """
-    Constructs the full global state for the mixer by integrating agent-specific
-    CNN features with other global entities (like environmental current).
-    This function modifies the agent entities in the global state to include the computed f_cnn.
-    """
-    batch_size = agent_f_cnn_features_batch.shape[0]
-    num_agents = agent_f_cnn_features_batch.shape[1]
-    final_global_state_batch_for_mixer = []
-
-    for b_idx in range(batch_size):
-        current_b_global_entities_raw = base_global_state_entities_batch[b_idx] # List of np.arrays
-        
-        temp_entities_for_b = []
-        # Find which entities from the env are agent representations
-        agent_entity_indices = [i for i, entity in enumerate(current_b_global_entities_raw) if entity[-3] == 1] # is_agent flag
-
-        # Create a mutable list of tensors
-        current_b_entities_tensors = [torch.from_numpy(e).float().to(device) for e in current_b_global_entities_raw]
-
-        # Replace f_cnn placeholders in agent entities
-        for agent_idx, entity_idx in enumerate(agent_entity_indices):
-            if agent_idx < num_agents:
-                entity_tensor = current_b_entities_tensors[entity_idx]
-                start_idx_fcnn = 2 + config_env.get("NUM_HEADINGS", 8) 
-                end_idx_fcnn = start_idx_fcnn + agent_f_cnn_features_batch.shape[2] # cnn_dim
-                
-                if end_idx_fcnn <= len(entity_tensor):
-                     entity_tensor[start_idx_fcnn:end_idx_fcnn] = agent_f_cnn_features_batch[b_idx, agent_idx, :]
-                else:
-                    # This case indicates a mismatch in feature engineering and config
-                    pass
-        
-        final_global_state_batch_for_mixer.append(current_b_entities_tensors)
-        
-    return final_global_state_batch_for_mixer
-
 
 def train(config):
+    """
+    Main training function for TransfQMix MARL algorithm on oil spill response task.
+    
+    Args:
+        config (dict): Configuration dictionary containing all training parameters,
+                      environment settings, network architectures, and logging options
+    """
     if config['use_cuda'] and torch.cuda.is_available():
         device = torch.device("cuda")
     else:
@@ -84,10 +59,9 @@ def train(config):
                            config['environment']['episode_data_directory'],
                            specific_episode_file=config['environment'].get('specific_episode_file'))
 
-    # --- MODIFICATION: Perform a preliminary reset() to load cell_size_meters for the visualizer
     logger.info("Performing initial environment reset to load parameters...")
     env.reset()
-    eval_env.reset() # Also reset the eval env
+    eval_env.reset()
     logger.info(f"Environment configured with cell size: {env.cell_size_meters:.2f} meters")
     
     obs_spec = env.get_observation_spec()
@@ -123,13 +97,12 @@ def train(config):
     if not os.path.exists(os.path.dirname(gif_output_path_template)):
         os.makedirs(os.path.dirname(gif_output_path_template))
     
-    # --- MODIFICATION: Initialize visualizer after env reset to get correct cell size
     visualizer = EpisodeVisualizer(
         grid_size_r=config['environment']['GRID_SIZE_R'],
         grid_size_c=config['environment']['GRID_SIZE_C'],
         num_agents=num_agents,
         num_headings=config['environment']['NUM_HEADINGS'],
-        cell_size_m=env.cell_size_meters, # Use the discovered value
+        cell_size_m=env.cell_size_meters,
         enabled=config['logging']['visualization_enabled'] and VISUALIZATION_ENABLED
     )
 
@@ -152,9 +125,17 @@ def train(config):
             with torch.no_grad():
                 for i, agent_id in enumerate(agent_ids):
                     belief_map_tensor = torch.from_numpy(current_agent_belief_maps_dict_np[agent_id]).float().unsqueeze(0).to(device)
-                    obs_entities_list_for_agent = [agent_obs_dict[agent_id]] 
+                    
+                    obs_entities_list = [agent_obs_dict[agent_id]]
+                    max_entities = len(obs_entities_list[0])
+                    obs_tensor = torch.zeros(1, max_entities, obs_spec['agent_observation']['entity_feature_dim'], device=device)
+                    obs_tensor[0, :max_entities, :] = torch.from_numpy(np.stack(obs_entities_list[0])).float()
+                    
+                    pad_mask = torch.ones(1, max_entities + 1, dtype=torch.bool, device=device)
+                    pad_mask[0, :(max_entities + 1)] = False
+                    
                     h_in_tensor = agent_h_states_prev[agent_id]
-                    q_values_agent, h_out_agent, _ = agent_policy_nn(belief_map_tensor, obs_entities_list_for_agent, h_in_tensor)
+                    q_values_agent, h_out_agent, _ = agent_policy_nn(belief_map_tensor, obs_tensor, h_in_tensor, pad_mask)
                     agent_h_states_current[agent_id] = h_out_agent
                     epsilon = np.interp(total_env_steps, [0, config['training']['epsilon_anneal_time']], [config['training']['epsilon_start'], config['training']['epsilon_finish']])
                     actions_dict[agent_id] = random.randint(0, action_space_size - 1) if random.random() < epsilon else q_values_agent.argmax(dim=1).item()
@@ -178,42 +159,73 @@ def train(config):
                 batch = replay_buffer.sample(config['training']['batch_size'])
                 if batch is None: continue
                 
-                agent_obs_b, agent_belief_maps_b, global_state_b_raw_from_buffer, actions_b, reward_b, \
-                next_agent_obs_b, next_agent_belief_maps_b, next_global_state_b_raw_from_buffer, done_b, \
-                h_in_prev_b, h_out_curr_b = (batch['agent_obs'], batch['agent_belief_maps'], batch['global_state'], 
-                                           batch['actions'], batch['reward'], batch['next_agent_obs'], 
-                                           batch['next_agent_belief_maps'], batch['next_global_state'],
-                                           batch['done'], batch['h_in_list'], batch['h_out_list'])
+                # Unpack all data from the now tensorized buffer sample
+                agent_obs_b, agent_obs_pad_mask_b = batch['agent_obs'], batch['agent_obs_pad_mask']
+                agent_belief_maps_b = batch['agent_belief_maps']
+                global_state_b, global_state_pad_mask_b = batch['global_state'], batch['global_state_pad_mask']
+                actions_b, reward_b, done_b = batch['actions'], batch['reward'], batch['done']
+                h_in_prev_b, h_out_curr_b = batch['h_in_list'], batch['h_out_list']
+                
+                next_agent_obs_b, next_agent_obs_pad_mask_b = batch['next_agent_obs'], batch['next_agent_obs_pad_mask']
+                next_agent_belief_maps_b = batch['next_agent_belief_maps']
+                next_global_state_b, next_global_state_pad_mask_b = batch['next_global_state'], batch['next_global_state_pad_mask']
+                
 
                 chosen_action_q_vals_batch = torch.zeros(config['training']['batch_size'], num_agents, device=device)
                 f_cnn_batch_policy = torch.zeros(config['training']['batch_size'], num_agents, config['agent_nn']['CNN_OUTPUT_FEATURE_DIM'], device=device)
+                
                 for agent_idx in range(num_agents):
+                    # These are slices for a single agent type across the batch
                     belief_map_tensor_agent = agent_belief_maps_b[:, agent_idx, :, :]
+                    obs_tensor_agent = agent_obs_b[:, agent_idx, :, :]
                     h_in_tensor_agent = h_in_prev_b[:, agent_idx, :]
-                    current_agent_obs_entities_for_batch = [obs[agent_idx] for obs in agent_obs_b]
-                    q_all_actions_agent, _, f_cnn_agent = agent_policy_nn(belief_map_tensor_agent, current_agent_obs_entities_for_batch, h_in_tensor_agent)
+                    pad_mask_agent = agent_obs_pad_mask_b[:, agent_idx, :]
+                    
+                    q_all_actions_agent, _, f_cnn_agent = agent_policy_nn(belief_map_tensor_agent, obs_tensor_agent, h_in_tensor_agent, pad_mask_agent)
+                    
                     action_taken_by_agent = actions_b[:, agent_idx].unsqueeze(1)
                     chosen_action_q_vals_batch[:, agent_idx] = q_all_actions_agent.gather(1, action_taken_by_agent).squeeze(1)
                     f_cnn_batch_policy[:, agent_idx, :] = f_cnn_agent
                 
-                global_state_for_policy_mixer = _prepare_global_state_for_mixer(global_state_b_raw_from_buffer, f_cnn_batch_policy, global_state_spec_env, config['environment'], device)
-                q_total_policy = mixer_policy_nn(chosen_action_q_vals_batch, global_state_for_policy_mixer, h_out_curr_b).squeeze()
+                # Vectorized logic to insert f_cnn into global state
+                flags_part_gs = global_state_b[:, :, -3:]
+                is_agent_placeholder_mask = (flags_part_gs[:, :, 0] == 1) & (flags_part_gs[:, :, 1] == 0) & (flags_part_gs[:, :, 2] == 0)
+                agent_indices = torch.where(is_agent_placeholder_mask)
+                
+                # Create a view of the features to be modified
+                start_idx_fcnn = 2 + config['environment'].get("NUM_HEADINGS", 8) 
+                end_idx_fcnn = start_idx_fcnn + f_cnn_batch_policy.shape[2]
+                global_state_for_policy_mixer = global_state_b.clone()
+                global_state_for_policy_mixer[agent_indices[0], agent_indices[1], start_idx_fcnn:end_idx_fcnn] = f_cnn_batch_policy.reshape(-1, f_cnn_batch_policy.shape[-1])
+                
+                q_total_policy = mixer_policy_nn(chosen_action_q_vals_batch, global_state_for_policy_mixer, h_out_curr_b, global_state_pad_mask_b).squeeze()
 
                 with torch.no_grad():
                     max_next_q_vals_target_batch = torch.zeros_like(chosen_action_q_vals_batch)
                     f_cnn_batch_target = torch.zeros_like(f_cnn_batch_policy)
                     h_next_target_batch = torch.zeros_like(h_out_curr_b)
-                    for agent_idx in range(num_agents):
-                        next_belief_map_tensor_agent = next_agent_belief_maps_b[:, agent_idx, :, :]
-                        h_in_for_next_tensor_agent = h_out_curr_b[:, agent_idx, :]
-                        current_next_agent_obs_entities_for_batch = [obs[agent_idx] for obs in next_agent_obs_b]
-                        q_all_next_actions_target, h_out_target_agent, f_cnn_next_target_agent = agent_target_nn(next_belief_map_tensor_agent, current_next_agent_obs_entities_for_batch, h_in_for_next_tensor_agent)
-                        max_next_q_vals_target_batch[:, agent_idx] = q_all_next_actions_target.max(dim=1)[0]
-                        f_cnn_batch_target[:, agent_idx, :] = f_cnn_next_target_agent
-                        h_next_target_batch[:, agent_idx, :] = h_out_target_agent
                     
-                    global_state_for_target_mixer = _prepare_global_state_for_mixer(next_global_state_b_raw_from_buffer, f_cnn_batch_target, global_state_spec_env, config['environment'], device)
-                    q_total_target = mixer_target_nn(max_next_q_vals_target_batch, global_state_for_target_mixer, h_next_target_batch).squeeze()
+                    for agent_idx in range(num_agents):
+                        next_belief_map_agent = next_agent_belief_maps_b[:, agent_idx, :, :]
+                        next_obs_agent = next_agent_obs_b[:, agent_idx, :, :]
+                        h_in_for_next_agent = h_out_curr_b[:, agent_idx, :]
+                        next_pad_mask_agent = next_agent_obs_pad_mask_b[:, agent_idx, :]
+                        
+                        q_all_next, h_out_target, f_cnn_next = agent_target_nn(next_belief_map_agent, next_obs_agent, h_in_for_next_agent, next_pad_mask_agent)
+                        
+                        max_next_q_vals_target_batch[:, agent_idx] = q_all_next.max(dim=1)[0]
+                        f_cnn_batch_target[:, agent_idx, :] = f_cnn_next
+                        h_next_target_batch[:, agent_idx, :] = h_out_target
+                    
+                    # Vectorized update for the target global state as well
+                    flags_part_gs_next = next_global_state_b[:, :, -3:]
+                    is_agent_placeholder_mask_next = (flags_part_gs_next[:, :, 0] == 1) & (flags_part_gs_next[:, :, 1] == 0) & (flags_part_gs_next[:, :, 2] == 0)
+                    agent_indices_next = torch.where(is_agent_placeholder_mask_next)
+                    
+                    global_state_for_target_mixer = next_global_state_b.clone()
+                    global_state_for_target_mixer[agent_indices_next[0], agent_indices_next[1], start_idx_fcnn:end_idx_fcnn] = f_cnn_batch_target.reshape(-1, f_cnn_batch_target.shape[-1])
+                    
+                    q_total_target = mixer_target_nn(max_next_q_vals_target_batch, global_state_for_target_mixer, h_next_target_batch, next_global_state_pad_mask_b).squeeze()
                 
                 y_target = reward_b.squeeze() + config['training']['gamma'] * (1 - done_b.squeeze().float()) * q_total_target
                 loss = F.huber_loss(q_total_policy, y_target.detach())
@@ -233,7 +245,6 @@ def train(config):
             _soft_update_target_networks(agent_policy_nn, agent_target_nn, config['training']['tau'])
             _soft_update_target_networks(mixer_policy_nn, mixer_target_nn, config['training']['tau'])
 
-        # --- CORRECTED EVALUATION AND VISUALIZATION LOOP ---
         if episode_num % config['training']['evaluation_interval_episodes'] == 0:
             logger.info(f"--- Running Evaluation after Episode {episode_num} ---")
             total_eval_reward = 0; total_eval_iou = 0;
@@ -241,7 +252,7 @@ def train(config):
 
             for eval_ep_num in range(config['training']['num_evaluation_episodes']):
                 eval_ep_reward = 0; eval_ep_iou_sum = 0; eval_ep_steps = 0
-                obs_eval, gs_eval_np = eval_env.reset() # This sets the initial state and IoU
+                obs_eval, gs_eval_np = eval_env.reset()
                 for aid in agent_ids: eval_agent_h_states[aid].zero_()
 
                 vis_this_eval_ep = visualizer.enabled and (eval_ep_num % config['logging']['visualization_interval_eval_episodes'] == 0)
@@ -269,9 +280,17 @@ def train(config):
                     with torch.no_grad():
                         for agent_id in agent_ids:
                             belief_map_t = torch.from_numpy(eval_belief_maps_np_dict[agent_id]).float().unsqueeze(0).to(device)
+                            
                             obs_entities_list = [obs_eval[agent_id]]
+                            max_entities = len(obs_entities_list[0])
+                            obs_tensor_eval = torch.zeros(1, max_entities, obs_spec['agent_observation']['entity_feature_dim'], device=device)
+                            obs_tensor_eval[0, :max_entities, :] = torch.from_numpy(np.stack(obs_entities_list[0])).float()
+                            
+                            pad_mask_eval = torch.ones(1, max_entities + 1, dtype=torch.bool, device=device)
+                            pad_mask_eval[0, :(max_entities + 1)] = False
+                            
                             h_in_t = eval_agent_h_states[agent_id]
-                            q_vals_eval, h_out_eval, _ = agent_policy_nn(belief_map_t, obs_entities_list, h_in_t)
+                            q_vals_eval, h_out_eval, _ = agent_policy_nn(belief_map_t, obs_tensor_eval, h_in_t, pad_mask_eval)
                             actions_eval[agent_id] = q_vals_eval.argmax(dim=1).item()
                             current_h_eval[agent_id] = h_out_eval
                     
@@ -327,6 +346,12 @@ def train(config):
 
 
 if __name__ == "__main__":
+    """
+    Main entry point for the TransfQMix MARL training script.
+    
+    Parses command line arguments, loads configuration, sets up random seeds,
+    creates necessary directories, and starts the training process.
+    """
     parser = argparse.ArgumentParser(description="Run TransfQMix MARL training for Oil Spill Response.")
     parser.add_argument("--config", type=str, default="marl_framework/configs/default_exp_config.yaml",
                         help="Path to the experiment configuration YAML file.")

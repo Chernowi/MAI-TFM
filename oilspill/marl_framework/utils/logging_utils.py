@@ -64,22 +64,3 @@ def log_hyperparameters(writer, hparams_dict, metrics_dict=None):
         writer.add_hparams(sanitized_hparams, metrics_dict)
     except Exception as e:
         print(f"Warning: Could not log hparams to TensorBoard: {e}. Hparams: {sanitized_hparams}")
-
-
-if __name__ == '__main__':
-    # Test logger
-    logger, log_sub = setup_logger("test_experiment")
-    logger.debug("This is a debug message.") # Won't show if level is INFO
-    logger.info("This is an info message.")
-    logger.warning("This is a warning message.")
-    
-    # Test TensorBoard writer
-    writer, writer_dir = get_tensorboard_writer("test_tb_experiment")
-    writer.add_scalar("Test/dummy_metric", 0.5, 0)
-    
-    dummy_hparams = {"lr": 0.001, "batch_size": 32, "layers": [64, 32]}
-    dummy_metrics = {"initial_loss": 10.0}
-    log_hyperparameters(writer, dummy_hparams, dummy_metrics)
-    
-    writer.close()
-    print(f"Test logs written to {log_sub} and {writer_dir}")
