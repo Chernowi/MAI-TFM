@@ -54,7 +54,10 @@ def load_checkpoint(filepath, agent_nn, mixer_nn, agent_target_nn=None, mixer_ta
         print(f"Checkpoint file not found: {filepath}")
         return None
 
-    checkpoint = torch.load(filepath, map_location=device)
+    # This is the line that needs to be changed.
+    # We add `weights_only=False` to allow loading older checkpoints
+    # that may contain non-tensor Python objects like numpy scalars.
+    checkpoint = torch.load(filepath, map_location=device, weights_only=False)
 
     if 'agent_nn_state_dict' in checkpoint:
         agent_nn.load_state_dict(checkpoint['agent_nn_state_dict'])
@@ -62,11 +65,11 @@ def load_checkpoint(filepath, agent_nn, mixer_nn, agent_target_nn=None, mixer_ta
     else:
         print("Warning: agent_nn_state_dict not found in checkpoint.")
 
-    if 'mixer_nn_state_dict' in checkpoint:
+    if mixer_nn and 'mixer_nn_state_dict' in checkpoint:
         mixer_nn.load_state_dict(checkpoint['mixer_nn_state_dict'])
         print("Loaded mixer_nn state dict.")
-    else:
-        print("Warning: mixer_nn_state_dict not found in checkpoint.")
+    elif mixer_nn:
+        print("Warning: mixer_nn_state_dict not found, but mixer network was provided.")
 
     if agent_target_nn and 'agent_target_nn_state_dict' in checkpoint:
         agent_target_nn.load_state_dict(checkpoint['agent_target_nn_state_dict'])
@@ -91,4 +94,3 @@ def load_checkpoint(filepath, agent_nn, mixer_nn, agent_target_nn=None, mixer_ta
     
     print(f"Loaded checkpoint from {filepath}")
     return checkpoint # Contains other info like epoch, best_metric etc.
-
