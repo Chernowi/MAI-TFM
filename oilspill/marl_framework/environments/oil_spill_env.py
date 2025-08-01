@@ -233,30 +233,60 @@ class OilSpillEnv:
 
     def _update_shared_consensus_map(self):
         """
-        Update the shared consensus map based on all agents' belief maps.
-        Oil presence takes priority, then clean areas are marked where unknown.
+        Update the shared consensus map by combining information from all agents
+        based on the most recent timestamp for each cell.
+
+        This method iterates through all agents and updates the shared map for
+        a given cell if an agent has a more recent observation (higher timestamp)
+        for that cell than what is currently in the shared map.
         """
         self.shared_consensus_map.fill(-1)
-        for agent_id in self.agent_ids: self.shared_consensus_map[self.agent_belief_maps[agent_id]['belief'] == 1] = 1
+        shared_timestamp_map = np.full((self.grid_size_r, self.grid_size_c), -1, dtype=np.int32)
+
         for agent_id in self.agent_ids:
-            is_clean = (self.agent_belief_maps[agent_id]['belief'] == 0)
-            is_unknown = (self.shared_consensus_map == -1)
-            self.shared_consensus_map[is_clean & is_unknown] = 0
+            agent_belief = self.agent_belief_maps[agent_id]['belief']
+            agent_timestamp = self.agent_belief_maps[agent_id]['timestamp']
+
+            # Find where the agent has more recent information than the current consensus
+            has_newer_info = agent_timestamp > shared_timestamp_map
+            
+            # Update both the shared belief and timestamp maps with this newer information
+            self.shared_consensus_map[has_newer_info] = agent_belief[has_newer_info]
+            shared_timestamp_map[has_newer_info] = agent_timestamp[has_newer_info]
 
     def _calculate_iou(self, consensus_map, gt_grid):
         """
-        Calculate Intersection over Union (IoU) between consensus map and ground truth.
+        Calculate the accuracy of the consensus map over known areas.
+        
+        This metric rewards both correctly identifying oil (True Positives) and
+        correctly identifying clean areas (True Negatives) within the cells
+        that agents have reported on (i.e., not unknown). The score is the
+        ratio of correct cells to all known cells.
         
         Args:
-            consensus_map (np.ndarray): Predicted oil locations
-            gt_grid (np.ndarray): Ground truth oil locations
+            consensus_map (np.ndarray): Predicted locations, where 1 is oil, 
+                                        0 is clean, and -1 is unknown.
+            gt_grid (np.ndarray): Ground truth locations, where 1 is oil and 0 is clean.
             
         Returns:
-            float: IoU score between 0 and 1
+            float: Accuracy score between 0 and 1 over known cells.
         """
-        pred_oil, true_oil = (consensus_map == 1), (gt_grid == 1)
-        union = np.sum(pred_oil | true_oil)
-        return 1.0 if union == 0 else np.sum(pred_oil & true_oil) / union
+        # Find cells where the consensus map has information (is not -1)
+        known_mask = (consensus_map != -1)
+        
+        # If no cells are known, the accuracy is 0.
+        num_known_cells = np.sum(known_mask)
+        if num_known_cells == 0:
+            return 0.0
+
+        # Compare the known parts of the consensus map with the ground truth
+        # In gt_grid, 0 is clean, 1 is oil.
+        # In consensus_map, -1 is unknown, 0 is clean, 1 is oil.
+        # A direct comparison works as `True` is 1 and `False` is 0.
+        correct_predictions = np.sum((consensus_map[known_mask] == gt_grid[known_mask]))
+        
+        accuracy = correct_predictions / num_known_cells
+        return accuracy
 
     def _get_observations_and_state(self):
         """
