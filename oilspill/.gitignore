@@ -11,3 +11,4 @@ marl_framework/saved_models/
 
 # Generated episode data
 marl_framework/episode_data/
+.vscode

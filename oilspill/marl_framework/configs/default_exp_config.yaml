@@ -35,6 +35,8 @@ environment:
   PENALTY_PER_STEP: 0 
   COLLISION_PENALTY: -1.0 # Smaller penalty for collision vs. boundary
   BOUNDARY_VIOLATION_PENALTY: -2.0 # Penalty for hitting a wall
+  TP_WEIGHT: 2.0
+  TN_WEIGHT: 1.0
 
   # --- Episode Control ---
   MAX_STEPS_PER_EPISODE: 400
