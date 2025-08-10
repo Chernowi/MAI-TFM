@@ -75,8 +75,8 @@ mixer_nn:
 #                         Training Configuration
 # ===================================================================
 training:
-  num_training_episodes: 100000 # Increased for longer training
-  learning_starts_episodes: 100 # Increased to get better initial random data
+  num_training_episodes: 5 # Increased for longer training
+  learning_starts_episodes: 0 # Increased to get better initial random data
   batch_size: 64
   replay_buffer_capacity: 40000
 
