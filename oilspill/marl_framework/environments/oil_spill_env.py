@@ -367,36 +367,30 @@ class OilSpillEnv:
         """
         self.current_env_step += 1
         
-        intended_displacements_meters = {}
-        for agent_id, action in actions_dict.items():
-            dr, dc = self._action_to_delta(action)
-            intended_displacements_meters[agent_id] = np.array([dc * self.cell_size_meters, dr * self.cell_size_meters])
-        
-        current_vec_m_per_step = self._get_current_vector_m_per_step()
+        # --- Agent Movement ---
+        current_vec_grid_per_step = self._get_current_vector_m_per_step() / self.cell_size_meters
         final_agent_positions_rc = {}
         boundary_violations_this_step = 0
         violating_agent_ids = []
 
         for agent_id in self.agent_ids:
             r_curr, c_curr = self.agent_positions_rc[agent_id]
-            x_m_curr, y_m_curr = (c_curr + 0.5) * self.cell_size_meters, (r_curr + 0.5) * self.cell_size_meters
-            dx_intent_m, dy_intent_m = intended_displacements_meters[agent_id]
-            dx_total_m, dy_total_m = dx_intent_m + current_vec_m_per_step[0], dy_intent_m + current_vec_m_per_step[1]
-            x_m_new, y_m_new = x_m_curr + dx_total_m, y_m_curr + dy_total_m
-            domain_w_m, domain_h_m = self.grid_size_c * self.cell_size_meters, self.grid_size_r * self.cell_size_meters
+            dr, dc = self._action_to_delta(actions_dict[agent_id])
             
+            # Apply current
+            dr_total = dr + current_vec_grid_per_step[1]
+            dc_total = dc + current_vec_grid_per_step[0]
+
+            r_new = r_curr + dr_total
+            c_new = c_curr + dc_total
+
             # Check for boundary violation
-            is_violating = not (0 <= x_m_new < domain_w_m and 0 <= y_m_new < domain_h_m)
-            if is_violating:
+            if not (0 <= r_new < self.grid_size_r and 0 <= c_new < self.grid_size_c):
                 boundary_violations_this_step += 1
                 violating_agent_ids.append(agent_id)
-                # If non-terminating, agent stays put. If terminating, this is just for info.
                 final_agent_positions_rc[agent_id] = self.agent_positions_rc[agent_id]
             else:
-                # If no violation, calculate new grid cell normally
-                c_final = int(x_m_new / self.cell_size_meters)
-                r_final = int(y_m_new / self.cell_size_meters)
-                final_agent_positions_rc[agent_id] = np.array([r_final, c_final])
+                final_agent_positions_rc[agent_id] = np.array([int(r_new), int(c_new)])
         
         # --- MODIFICATION: Optional Termination Logic ---
         if boundary_violations_this_step > 0 and self.terminate_on_boundary_violation:

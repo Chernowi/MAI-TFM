@@ -148,22 +148,35 @@ def train(config, load_checkpoint_path=None): # Added load_checkpoint_path argum
             current_agent_belief_maps_dict_np = {aid: env.agent_belief_maps[aid]['belief'].copy() for aid in agent_ids}
 
             with torch.no_grad():
+                belief_maps_list = [torch.from_numpy(current_agent_belief_maps_dict_np[aid]).float() for aid in agent_ids]
+                belief_maps_tensor = torch.stack(belief_maps_list).to(device)
+
+                obs_list = [agent_obs_dict[aid] for aid in agent_ids]
+                max_entities = max(len(obs) for obs in obs_list)
+                
+                obs_tensor = torch.zeros(num_agents, max_entities, obs_spec['agent_observation']['entity_feature_dim'], device=device)
+                for i, obs in enumerate(obs_list):
+                    if obs:
+                        obs_tensor[i, :len(obs), :] = torch.from_numpy(np.array(obs)).float()
+
+                pad_mask = torch.ones(num_agents, max_entities + 1, dtype=torch.bool, device=device)
+                for i, obs in enumerate(obs_list):
+                    pad_mask[i, :(len(obs) + 1)] = False
+
+                h_in_tensor = torch.cat([agent_h_states_prev[aid] for aid in agent_ids], dim=0)
+                
+                q_values, h_out, _ = agent_policy_nn(belief_maps_tensor, obs_tensor, h_in_tensor, pad_mask)
+                
                 for i, agent_id in enumerate(agent_ids):
-                    belief_map_tensor = torch.from_numpy(current_agent_belief_maps_dict_np[agent_id]).float().unsqueeze(0).to(device)
-                    
-                    obs_entities_list = [agent_obs_dict[agent_id]]
-                    max_entities = len(obs_entities_list[0])
-                    obs_tensor = torch.zeros(1, max_entities, obs_spec['agent_observation']['entity_feature_dim'], device=device)
-                    obs_tensor[0, :max_entities, :] = torch.from_numpy(np.stack(obs_entities_list[0])).float()
-                    
-                    pad_mask = torch.ones(1, max_entities + 1, dtype=torch.bool, device=device)
-                    pad_mask[0, :(max_entities + 1)] = False
-                    
-                    h_in_tensor = agent_h_states_prev[agent_id]
-                    q_values_agent, h_out_agent, _ = agent_policy_nn(belief_map_tensor, obs_tensor, h_in_tensor, pad_mask)
-                    agent_h_states_current[agent_id] = h_out_agent
-                    epsilon = np.interp(total_env_steps, [0, config['training']['epsilon_anneal_time']], [config['training']['epsilon_start'], config['training']['epsilon_finish']])
-                    actions_dict[agent_id] = random.randint(0, action_space_size - 1) if random.random() < epsilon else q_values_agent.argmax(dim=1).item()
+                    agent_h_states_current[agent_id] = h_out[i].unsqueeze(0)
+
+                epsilon = np.interp(total_env_steps, [0, config['training']['epsilon_anneal_time']], [config['training']['epsilon_start'], config['training']['epsilon_finish']])
+                
+                if random.random() < epsilon:
+                    actions_dict = {aid: random.randint(0, action_space_size - 1) for aid in agent_ids}
+                else:
+                    actions = q_values.argmax(dim=1).cpu().numpy()
+                    actions_dict = {aid: actions[i] for i, aid in enumerate(agent_ids)}
             
             next_agent_obs_dict, next_global_state_entities_np, rewards_dict, dones_dict, infos_dict = env.step(actions_dict)
             next_agent_belief_maps_dict_np = {aid: env.agent_belief_maps[aid]['belief'].copy() for aid in agent_ids}
@@ -195,29 +208,27 @@ def train(config, load_checkpoint_path=None): # Added load_checkpoint_path argum
                 next_agent_belief_maps_b = batch['next_agent_belief_maps']
                 next_global_state_b, next_global_state_pad_mask_b = batch['next_global_state'], batch['next_global_state_pad_mask']
                 
+                batch_size = agent_obs_b.shape[0]
 
-                chosen_action_q_vals_batch = torch.zeros(config['training']['batch_size'], num_agents, device=device)
-                f_cnn_batch_policy = torch.zeros(config['training']['batch_size'], num_agents, config['agent_nn']['CNN_OUTPUT_FEATURE_DIM'], device=device)
+                # Vectorized Q-value calculation for policy network
+                q_all_actions, _, f_cnn_batch_policy = agent_policy_nn(
+                    agent_belief_maps_b.view(batch_size * num_agents, *agent_belief_maps_b.shape[2:]),
+                    agent_obs_b.view(batch_size * num_agents, *agent_obs_b.shape[2:]),
+                    h_in_prev_b.view(batch_size * num_agents, -1),
+                    agent_obs_pad_mask_b.view(batch_size * num_agents, -1)
+                )
                 
-                for agent_idx in range(num_agents):
-                    # These are slices for a single agent type across the batch
-                    belief_map_tensor_agent = agent_belief_maps_b[:, agent_idx, :, :]
-                    obs_tensor_agent = agent_obs_b[:, agent_idx, :, :]
-                    h_in_tensor_agent = h_in_prev_b[:, agent_idx, :]
-                    pad_mask_agent = agent_obs_pad_mask_b[:, agent_idx, :]
-                    
-                    q_all_actions_agent, _, f_cnn_agent = agent_policy_nn(belief_map_tensor_agent, obs_tensor_agent, h_in_tensor_agent, pad_mask_agent)
-                    
-                    action_taken_by_agent = actions_b[:, agent_idx].unsqueeze(1)
-                    chosen_action_q_vals_batch[:, agent_idx] = q_all_actions_agent.gather(1, action_taken_by_agent).squeeze(1)
-                    f_cnn_batch_policy[:, agent_idx, :] = f_cnn_agent
-                
+                q_all_actions = q_all_actions.view(batch_size, num_agents, -1)
+                f_cnn_batch_policy = f_cnn_batch_policy.view(batch_size, num_agents, -1)
+
+                action_taken_by_agent = actions_b.unsqueeze(2)
+                chosen_action_q_vals_batch = torch.gather(q_all_actions, 2, action_taken_by_agent).squeeze(2)
+
                 # Vectorized logic to insert f_cnn into global state
                 flags_part_gs = global_state_b[:, :, -3:]
                 is_agent_placeholder_mask = (flags_part_gs[:, :, 0] == 1) & (flags_part_gs[:, :, 1] == 0) & (flags_part_gs[:, :, 2] == 0)
                 agent_indices = torch.where(is_agent_placeholder_mask)
                 
-                # Create a view of the features to be modified
                 start_idx_fcnn = 2 + config['environment'].get("NUM_HEADINGS", 8) 
                 end_idx_fcnn = start_idx_fcnn + f_cnn_batch_policy.shape[2]
                 global_state_for_policy_mixer = global_state_b.clone()
@@ -226,31 +237,29 @@ def train(config, load_checkpoint_path=None): # Added load_checkpoint_path argum
                 q_total_policy = mixer_policy_nn(chosen_action_q_vals_batch, global_state_for_policy_mixer, h_out_curr_b, global_state_pad_mask_b).squeeze()
 
                 with torch.no_grad():
-                    max_next_q_vals_target_batch = torch.zeros_like(chosen_action_q_vals_batch)
-                    f_cnn_batch_target = torch.zeros_like(f_cnn_batch_policy)
-                    h_next_target_batch = torch.zeros_like(h_out_curr_b)
-                    
-                    for agent_idx in range(num_agents):
-                        next_belief_map_agent = next_agent_belief_maps_b[:, agent_idx, :, :]
-                        next_obs_agent = next_agent_obs_b[:, agent_idx, :, :]
-                        h_in_for_next_agent = h_out_curr_b[:, agent_idx, :]
-                        next_pad_mask_agent = next_agent_obs_pad_mask_b[:, agent_idx, :]
-                        
-                        q_all_next, h_out_target, f_cnn_next = agent_target_nn(next_belief_map_agent, next_obs_agent, h_in_for_next_agent, next_pad_mask_agent)
-                        
-                        max_next_q_vals_target_batch[:, agent_idx] = q_all_next.max(dim=1)[0]
-                        f_cnn_batch_target[:, agent_idx, :] = f_cnn_next
-                        h_next_target_batch[:, agent_idx, :] = h_out_target
-                    
+                    # Vectorized Q-value calculation for target network
+                    q_all_next, h_out_target, f_cnn_next = agent_target_nn(
+                        next_agent_belief_maps_b.view(batch_size * num_agents, *next_agent_belief_maps_b.shape[2:]),
+                        next_agent_obs_b.view(batch_size * num_agents, *next_agent_obs_b.shape[2:]),
+                        h_out_curr_b.view(batch_size * num_agents, -1),
+                        next_agent_obs_pad_mask_b.view(batch_size * num_agents, -1)
+                    )
+
+                    q_all_next = q_all_next.view(batch_size, num_agents, -1)
+                    h_out_target = h_out_target.view(batch_size, num_agents, -1)
+                    f_cnn_next = f_cnn_next.view(batch_size, num_agents, -1)
+
+                    max_next_q_vals_target_batch = q_all_next.max(dim=2)[0]
+
                     # Vectorized update for the target global state as well
                     flags_part_gs_next = next_global_state_b[:, :, -3:]
                     is_agent_placeholder_mask_next = (flags_part_gs_next[:, :, 0] == 1) & (flags_part_gs_next[:, :, 1] == 0) & (flags_part_gs_next[:, :, 2] == 0)
                     agent_indices_next = torch.where(is_agent_placeholder_mask_next)
                     
                     global_state_for_target_mixer = next_global_state_b.clone()
-                    global_state_for_target_mixer[agent_indices_next[0], agent_indices_next[1], start_idx_fcnn:end_idx_fcnn] = f_cnn_batch_target.reshape(-1, f_cnn_batch_target.shape[-1])
+                    global_state_for_target_mixer[agent_indices_next[0], agent_indices_next[1], start_idx_fcnn:end_idx_fcnn] = f_cnn_next.reshape(-1, f_cnn_next.shape[-1])
                     
-                    q_total_target = mixer_target_nn(max_next_q_vals_target_batch, global_state_for_target_mixer, h_next_target_batch, next_global_state_pad_mask_b).squeeze()
+                    q_total_target = mixer_target_nn(max_next_q_vals_target_batch, global_state_for_target_mixer, h_out_target, next_global_state_pad_mask_b).squeeze()
                 
                 y_target = reward_b.squeeze() + config['training']['gamma'] * (1 - done_b.squeeze().float()) * q_total_target
                 loss = F.huber_loss(q_total_policy, y_target.detach())
@@ -303,21 +312,30 @@ def train(config, load_checkpoint_path=None): # Added load_checkpoint_path argum
                     eval_belief_maps_np_dict = {aid: eval_env.agent_belief_maps[aid]['belief'] for aid in agent_ids}
                     
                     with torch.no_grad():
-                        for agent_id in agent_ids:
-                            belief_map_t = torch.from_numpy(eval_belief_maps_np_dict[agent_id]).float().unsqueeze(0).to(device)
-                            
-                            obs_entities_list = [obs_eval[agent_id]]
-                            max_entities = len(obs_entities_list[0])
-                            obs_tensor_eval = torch.zeros(1, max_entities, obs_spec['agent_observation']['entity_feature_dim'], device=device)
-                            obs_tensor_eval[0, :max_entities, :] = torch.from_numpy(np.stack(obs_entities_list[0])).float()
-                            
-                            pad_mask_eval = torch.ones(1, max_entities + 1, dtype=torch.bool, device=device)
-                            pad_mask_eval[0, :(max_entities + 1)] = False
-                            
-                            h_in_t = eval_agent_h_states[agent_id]
-                            q_vals_eval, h_out_eval, _ = agent_policy_nn(belief_map_t, obs_tensor_eval, h_in_t, pad_mask_eval)
-                            actions_eval[agent_id] = q_vals_eval.argmax(dim=1).item()
-                            current_h_eval[agent_id] = h_out_eval
+                        belief_maps_list_eval = [torch.from_numpy(eval_belief_maps_np_dict[aid]).float() for aid in agent_ids]
+                        belief_maps_tensor_eval = torch.stack(belief_maps_list_eval).to(device)
+
+                        obs_list_eval = [obs_eval[aid] for aid in agent_ids]
+                        max_entities_eval = max(len(obs) for obs in obs_list_eval)
+                        
+                        obs_tensor_eval = torch.zeros(num_agents, max_entities_eval, obs_spec['agent_observation']['entity_feature_dim'], device=device)
+                        for i, obs in enumerate(obs_list_eval):
+                            if obs:
+                                obs_tensor_eval[i, :len(obs), :] = torch.from_numpy(np.array(obs)).float()
+
+                        pad_mask_eval = torch.ones(num_agents, max_entities_eval + 1, dtype=torch.bool, device=device)
+                        for i, obs in enumerate(obs_list_eval):
+                            pad_mask_eval[i, :(len(obs) + 1)] = False
+
+                        h_in_tensor_eval = torch.cat([eval_agent_h_states[aid] for aid in agent_ids], dim=0)
+                        
+                        q_values_eval, h_out_eval, _ = agent_policy_nn(belief_maps_tensor_eval, obs_tensor_eval, h_in_tensor_eval, pad_mask_eval)
+                        
+                        actions = q_values_eval.argmax(dim=1).cpu().numpy()
+                        actions_eval = {aid: actions[i] for i, aid in enumerate(agent_ids)}
+
+                        for i, agent_id in enumerate(agent_ids):
+                            current_h_eval[agent_id] = h_out_eval[i].unsqueeze(0)
                     
                     next_obs_eval, next_gs_eval_np, rewards_eval, dones_eval, infos_eval = eval_env.step(actions_eval)
                     
