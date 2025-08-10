@@ -39,7 +39,9 @@ class OilSpillEnv:
         self.reward_scaling_factor = self.config.get("REWARD_SCALING_FACTOR", 100.0)
         self.penalty_per_step = self.config.get("PENALTY_PER_STEP", -0.01)
         self.collision_penalty = self.config.get("COLLISION_PENALTY", -1.0)
-        self.boundary_violation_penalty = self.config.get("BOUNDARY_VIOLATION_PENALTY", -10.0)
+        self.boundary_violation_penalty = self.config.get("BOUNDARY_VIOLATION_PENALTY", -1.0)
+        self.tp_weight = self.config.get("TP_WEIGHT", 2.0)
+        self.tn_weight = self.config.get("TN_WEIGHT", 1.0)
 
         # Episode termination
         self.max_steps_per_episode = self.config.get("MAX_STEPS_PER_EPISODE", 400)
@@ -279,14 +281,27 @@ class OilSpillEnv:
         if num_known_cells == 0:
             return 0.0
 
-        # Compare the known parts of the consensus map with the ground truth
-        # In gt_grid, 0 is clean, 1 is oil.
-        # In consensus_map, -1 is unknown, 0 is clean, 1 is oil.
-        # A direct comparison works as `True` is 1 and `False` is 0.
-        correct_predictions = np.sum((consensus_map[known_mask] == gt_grid[known_mask]))
-        
-        accuracy = correct_predictions / num_known_cells
-        return accuracy
+        # Extract known parts of the maps
+        known_consensus = consensus_map[known_mask]
+        known_gt = gt_grid[known_mask]
+
+        # True Positives: consensus is 1, ground truth is 1
+        tp = np.sum((known_consensus == 1) & (known_gt == 1))
+        # True Negatives: consensus is 0, ground truth is 0
+        tn = np.sum((known_consensus == 0) & (known_gt == 0))
+        # False Positives: consensus is 1, ground truth is 0
+        fp = np.sum((known_consensus == 1) & (known_gt == 0))
+        # False Negatives: consensus is 0, ground truth is 1
+        fn = np.sum((known_consensus == 0) & (known_gt == 1))
+
+        weighted_numerator = (tp * self.tp_weight) + (tn * self.tn_weight)
+        weighted_denominator = (tp * self.tp_weight) + (tn * self.tn_weight) + (fp * self.tp_weight) + (fn * self.tn_weight)
+
+        if weighted_denominator == 0:
+            return 0.0
+
+        weighted_accuracy = weighted_numerator / weighted_denominator
+        return weighted_accuracy
 
     def _get_observations_and_state(self):
         """
