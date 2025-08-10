@@ -30,19 +30,26 @@ def _soft_update_target_networks(policy_net, target_net, tau):
         target_param.data.copy_(tau * policy_param.data + (1.0 - tau) * target_param.data)
 
 
-def train(config):
+def train(config, load_checkpoint_path=None): # Added load_checkpoint_path argument
     """
     Main training function for TransfQMix MARL algorithm on oil spill response task.
     
     Args:
         config (dict): Configuration dictionary containing all training parameters,
                       environment settings, network architectures, and logging options
+        load_checkpoint_path (str, optional): Path to a checkpoint file to resume training from.
     """
     if config['use_cuda'] and torch.cuda.is_available():
         device = torch.device("cuda")
     else:
         device = torch.device("cpu")
 
+    # The logging directory for the experiment is unique per run (timestamped).
+    # If resuming, logs will continue in a *new* log folder.
+    # To log to the *same* TensorBoard run, you would need to pass the specific
+    # tb_log_dir to get_tensorboard_writer, but the current design creates a new one.
+    # This is often desired when changing code (e.g., environment logic) during a resume,
+    # as it represents a new "variant" of the experiment.
     logger, log_subdir = setup_logger(config['experiment_name'], 
                                       log_dir=os.path.join(config['logging']['log_dir'], config['experiment_name']),
                                       level=config['logging']['log_level'].upper())
@@ -75,19 +82,36 @@ def train(config):
     agent_nn_global_config_ext["ACTION_SPACE_SIZE"] = action_space_size
     agent_policy_nn = TransfQMixAgentNN(obs_spec, config['agent_nn'], agent_nn_global_config_ext).to(device)
     agent_target_nn = TransfQMixAgentNN(obs_spec, config['agent_nn'], agent_nn_global_config_ext).to(device)
-    agent_target_nn.load_state_dict(agent_policy_nn.state_dict())
-    agent_target_nn.eval()
     mixer_policy_nn = TransfQMixMixer(num_agents, global_state_spec_env, 
                                      config['agent_nn']['AGENT_TRANSFORMER_EMBED_DIM'], 
                                      config['mixer_nn']).to(device)
     mixer_target_nn = TransfQMixMixer(num_agents, global_state_spec_env,
                                      config['agent_nn']['AGENT_TRANSFORMER_EMBED_DIM'],
                                      config['mixer_nn']).to(device)
-    mixer_target_nn.load_state_dict(mixer_policy_nn.state_dict())
-    mixer_target_nn.eval()
 
     params_to_optimize = list(agent_policy_nn.parameters()) + list(mixer_policy_nn.parameters())
     optimizer = optim.Adam(params_to_optimize, lr=config['training']['learning_rate'])
+
+    # --- Resume from Checkpoint if Provided ---
+    start_episode = 1
+    best_eval_iou = -float('inf')
+    if load_checkpoint_path:
+        logger.info(f"Attempting to load checkpoint from: {load_checkpoint_path}")
+        # Note: We pass target networks here too, but they will be overwritten by policy networks right after
+        checkpoint = load_checkpoint(load_checkpoint_path, agent_policy_nn, mixer_policy_nn, optimizer=optimizer, device=device)
+        if checkpoint:
+            # We add 1 to the episode number to start the *next* episode after the loaded one.
+            start_episode = checkpoint.get('episode', 0) + 1 
+            best_eval_iou = checkpoint.get('best_eval_iou', -float('inf'))
+            logger.info(f"Resuming training from episode {start_episode}. Best IoU so far: {best_eval_iou:.3f}")
+        else:
+            logger.warning("Could not load checkpoint. Starting from scratch.")
+
+    # Target networks should always be initialized from the policy networks (after loading checkpoint or fresh init)
+    agent_target_nn.load_state_dict(agent_policy_nn.state_dict())
+    agent_target_nn.eval()
+    mixer_target_nn.load_state_dict(mixer_policy_nn.state_dict())
+    mixer_target_nn.eval()
 
     replay_buffer = ReplayBuffer(config['training']['replay_buffer_capacity'], num_agents, agent_ids, obs_spec, global_state_spec_env, device)
     
@@ -107,11 +131,12 @@ def train(config):
     )
 
     logger.info("Starting training...")
-    total_env_steps = 0
-    best_eval_iou = -float('inf')
+    # Approximate total steps for epsilon annealing when resuming
+    total_env_steps = (start_episode - 1) * config['environment']['MAX_STEPS_PER_EPISODE']
     agent_h_states_prev = {aid: torch.zeros(1, config['agent_nn']['AGENT_TRANSFORMER_EMBED_DIM']).to(device) for aid in agent_ids}
 
-    for episode_num in range(1, config['training']['num_training_episodes'] + 1):
+    # The main training loop now starts from `start_episode`
+    for episode_num in range(start_episode, config['training']['num_training_episodes'] + 1):
         ep_reward = 0; ep_iou_sum = 0; ep_steps = 0
         agent_obs_dict, global_state_entities_np = env.reset()
         for aid in agent_ids: agent_h_states_prev[aid].zero_()
@@ -355,6 +380,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run TransfQMix MARL training for Oil Spill Response.")
     parser.add_argument("--config", type=str, default="marl_framework/configs/default_exp_config.yaml",
                         help="Path to the experiment configuration YAML file.")
+    # Added argument for loading checkpoint
+    parser.add_argument("--load_checkpoint_path", type=str, default=None,
+                        help="Path to a checkpoint file (.pth.tar) to resume training from.")
     args = parser.parse_args()
     with open(args.config, 'r') as f: config_params = yaml.safe_load(f)
     
@@ -364,10 +392,12 @@ if __name__ == "__main__":
         np.random.seed(config_params['seed'])
         random.seed(config_params['seed'])
 
+    # Ensure all necessary directories exist
     os.makedirs(os.path.join(config_params['logging']['log_dir'], config_params['experiment_name']), exist_ok=True)
     os.makedirs(os.path.join(config_params['logging']['tb_log_dir'], config_params['experiment_name']), exist_ok=True)
     os.makedirs(os.path.join(config_params['logging']['model_save_dir'], config_params['experiment_name']), exist_ok=True)
     os.makedirs(config_params['environment']['episode_data_directory'], exist_ok=True)
     os.makedirs(os.path.join(config_params['logging']['visualization_gif_output_dir'], config_params['experiment_name']), exist_ok=True)
 
-    train(config_params)
+    # Pass the load_checkpoint_path to the train function
+    train(config_params, args.load_checkpoint_path)
